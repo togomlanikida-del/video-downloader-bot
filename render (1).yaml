@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: video-downloader-bot
+    env: python
+    buildCommand: "pip install -r requirements.txt && apt-get install -y ffmpeg || true"
+    startCommand: "python bot.py"
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: 8851907428:AAGMTf9Mz0XWKvH9cP-r7Oe4CE6Fdqgpdm8
