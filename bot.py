@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 import subprocess
 import tempfile
 from telegram import Update
@@ -30,7 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📺 YouTube\n"
         "📸 Instagram\n"
         "🎵 TikTok\n\n"
-        "Havola yuboring — men videoni yuklab beraman!"
+        "Men sizga videoni HAM, uning musiqasini (MP3) HAM yuborib beraman!"
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,7 +37,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ Qanday foydalanish:\n\n"
         "1. YouTube, Instagram yoki TikTok dan video havolasini nusxa oling\n"
         "2. Shu botga yuboring\n"
-        "3. Video yuklab beriladi!\n\n"
+        "3. Sizga video VA uning musiqasi (mp3) yuboriladi!\n\n"
         "⚠️ Eslatma: Maxfiy (private) videolar yuklab bo'lmaydi."
     )
 
@@ -57,7 +56,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_template = os.path.join(tmpdir, "%(title)s.%(ext)s")
+            output_template = os.path.join(tmpdir, "media.%(ext)s")
             
             cmd = [
                 "yt-dlp",
@@ -81,8 +80,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Find downloaded file
-            files = os.listdir(tmpdir)
+            files = [f for f in os.listdir(tmpdir) if f.startswith("media.")]
             if not files:
                 await msg.edit_text("❌ Fayl topilmadi.")
                 return
@@ -91,8 +89,6 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file_size = os.path.getsize(video_path)
             size_mb = file_size / (1024 * 1024)
             
-            await msg.edit_text(f"📤 Video yuborilmoqda... ({size_mb:.1f} MB)")
-            
             if file_size > 50 * 1024 * 1024:
                 await msg.edit_text(
                     f"⚠️ Video hajmi juda katta ({size_mb:.1f} MB).\n"
@@ -100,13 +96,42 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
+            # Send video first
+            await msg.edit_text(f"📤 Video yuborilmoqda... ({size_mb:.1f} MB)")
             with open(video_path, "rb") as video_file:
                 await update.message.reply_video(
                     video=video_file,
-                    caption=f"✅ {platform} dan yuklandi!"
+                    caption=f"✅ {platform} dan video yuklandi!"
                 )
             
-            await msg.delete()
+            # Now extract audio as MP3
+            await msg.edit_text("🎵 Musiqa (MP3) ajratilmoqda...")
+            audio_path = os.path.join(tmpdir, "audio.mp3")
+            
+            extract_cmd = [
+                "ffmpeg", "-i", video_path,
+                "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+                "-y", audio_path
+            ]
+            
+            audio_result = subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60)
+            
+            if audio_result.returncode == 0 and os.path.exists(audio_path):
+                audio_size = os.path.getsize(audio_path)
+                audio_size_mb = audio_size / (1024 * 1024)
+                
+                if audio_size <= 50 * 1024 * 1024:
+                    with open(audio_path, "rb") as audio_file:
+                        await update.message.reply_audio(
+                            audio=audio_file,
+                            caption=f"🎵 Musiqa (MP3) - {platform}",
+                            title=f"{platform} audio"
+                        )
+                    await msg.delete()
+                else:
+                    await msg.edit_text(f"✅ Video yuborildi! (Audio juda katta: {audio_size_mb:.1f}MB)")
+            else:
+                await msg.edit_text("✅ Video yuborildi! (Audio ajratib bo'lmadi)")
             
     except subprocess.TimeoutExpired:
         await msg.edit_text("❌ Vaqt tugadi. Qaytadan urinib ko'ring.")
