@@ -2,10 +2,13 @@ import logging
 import os
 import subprocess
 import tempfile
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.error import BadRequest
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8851907428:AAGMTf9Mz0XWKvH9cP-r7Oe4CE6Fdqgpdm8")
+CHANNEL_USERNAME = "@vakhidovv700"
+CHANNEL_LINK = "https://t.me/vakhidovv700"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -22,7 +25,35 @@ def is_instagram(url):
 def is_tiktok(url):
     return "tiktok.com" in url or "vm.tiktok.com" in url
 
+async def check_subscription(user_id, context):
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except BadRequest:
+        return False
+    except Exception as e:
+        logger.error(f"Subscription check error: {e}")
+        return False
+
+def get_subscribe_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("📢 Kanalga obuna bo'lish", url=CHANNEL_LINK)],
+        [InlineKeyboardButton("✅ Obuna bo'ldim", callback_data="check_sub")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    is_subscribed = await check_subscription(user_id, context)
+    
+    if not is_subscribed:
+        await update.message.reply_text(
+            "👋 Salom! Botdan foydalanish uchun avval kanalimizga obuna bo'ling:\n\n"
+            "Obuna bo'lgandan keyin '✅ Obuna bo'ldim' tugmasini bosing.",
+            reply_markup=get_subscribe_keyboard()
+        )
+        return
+    
     await update.message.reply_text(
         "🎬 Salom! Men video yuklovchi botman!\n\n"
         "Quyidagi platformalardan video havolasini yuboring:\n"
@@ -31,6 +62,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎵 TikTok\n\n"
         "Men sizga videoni HAM, uning musiqasini (MP3) HAM yuborib beraman!"
     )
+
+async def check_sub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    is_subscribed = await check_subscription(user_id, context)
+    
+    if is_subscribed:
+        await query.edit_message_text(
+            "✅ Rahmat! Endi botdan foydalanishingiz mumkin.\n\n"
+            "🎬 YouTube, Instagram yoki TikTok havolasini yuboring!"
+        )
+    else:
+        await query.answer("❌ Siz hali obuna bo'lmagansiz!", show_alert=True)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -42,6 +86,16 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    is_subscribed = await check_subscription(user_id, context)
+    
+    if not is_subscribed:
+        await update.message.reply_text(
+            "❌ Botdan foydalanish uchun avval kanalimizga obuna bo'ling:",
+            reply_markup=get_subscribe_keyboard()
+        )
+        return
+    
     url = update.message.text.strip()
     
     if not (is_youtube(url) or is_instagram(url) or is_tiktok(url)):
@@ -143,6 +197,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(check_sub_callback, pattern="^check_sub$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download_video))
     logger.info("Bot ishga tushdi!")
     app.run_polling(drop_pending_updates=True)
