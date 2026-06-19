@@ -153,7 +153,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         output_template = os.path.join(tmpdir, "media.%(ext)s")
         
-        cmd = [
+        base_cmd = [
             "yt-dlp",
             "--no-playlist",
             "-f", "best[ext=mp4]/best",
@@ -161,14 +161,28 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "-o", output_template,
         ]
         
+        result = None
         if is_youtube(url):
-            cmd += ["--extractor-args", "youtube:player_client=android"]
+            # Try multiple client strategies for YouTube/Shorts
+            client_strategies = ["android", "ios", "web", "tv_embedded"]
+            for client in client_strategies:
+                cmd = base_cmd + ["--extractor-args", f"youtube:player_client={client}", url]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode == 0:
+                    break
+                # clean up any partial files between attempts
+                for f in os.listdir(tmpdir):
+                    try:
+                        os.remove(os.path.join(tmpdir, f))
+                    except OSError:
+                        pass
+        else:
+            cmd = base_cmd + [url]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
-        cmd.append(url)
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
-        if result.returncode != 0:
+        if result is None or result.returncode != 0:
+            error_detail = result.stderr[-300:] if result else "unknown"
+            logger.error(f"yt-dlp failed for {url}: {error_detail}")
             await msg.edit_text(
                 "❌ Video yuklab bo'lmadi.\n\n"
                 "Sabab: Video maxfiy yoki cheklangan bo'lishi mumkin."
